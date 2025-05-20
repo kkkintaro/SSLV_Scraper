@@ -27,6 +27,48 @@ TRANSMISSION = "Automāts"  # Automātiskā transmisija
 PAGE_LIMIT = 10  # Maksimālais skrapējamo lapu skaits
 PAGE_LOAD_DELAY = 1.5  # Sekundes, aizkave starp lapu ielādēm
 
+# --- Palīgfunkcijas ---
+def parse_ads_from_page(html_content):
+    """
+    Apstrādā lapas HTML saturu, lai iegūtu sludinājumu datus.
+    """
+    soup = BeautifulSoup(html_content, "html.parser")
+    ads_list = []
+    ad_rows = soup.find_all("tr", id=re.compile(r"^tr_\d+$"))
+
+    if not ad_rows:
+        # Saglabā HTML atkļūdošanai
+        with open("debug_response.html", "w", encoding="utf-8") as f:
+            f.write(html_content)
+        print(f"Nevarēja atrast sludinājumu rindas. HTML saglabāts failā 'debug_response.html'")
+        return ads_list
+
+    for row in ad_rows:
+        cols = row.find_all("td")
+        if len(cols) < 8:
+            continue
+        try:
+            ad_data = {}
+            link_tag = cols[2].find('a', href=re.compile(r"/msg/"))
+            if not link_tag or not link_tag.get('href'):
+                continue 
+            
+            ad_data['title'] = link_tag.get_text(strip=True)
+            ad_data['link'] = urljoin(BASE_URL, link_tag['href'])
+            ad_data['model'] = cols[3].get_text(strip=True)
+            ad_data['year'] = cols[4].get_text(strip=True)
+            ad_data['volume'] = cols[5].get_text(strip=True)
+            ad_data['mileage'] = cols[6].get_text(strip=True)
+            price_text = cols[7].get_text(strip=True)
+            ad_data['price'] = ' '.join(price_text.split())
+
+            if ad_data.get('title') and ad_data.get('link'):
+                ads_list.append(ad_data)
+        except Exception as e:
+            print(f"Kļūda apstrādājot rindu: {e}")
+            continue
+    return ads_list
+
 # --- Draivera iestatīšana ---
 def setup_driver():
     """
@@ -67,9 +109,11 @@ def setup_driver():
 # --- Galvenā funkcija ---
 def main():
     """
-    Skripta galvenā izpildes funkcija - V1: Pamata savienojums ar SS.LV
+    Skripta galvenā izpildes funkcija - V2: Sludinājumu datu iegūšana
     """
-    print("--- SS.LV Auto Skrāpja (Versija 1: Pamata savienojums) Palaišana ---")
+    print("--- SS.LV Auto Skrāpja (Versija 2: Sludinājumu datu iegūšana) Palaišana ---")
+    
+    all_collected_ads = []
     
     try:
         # Iestatīt Selenium pārlūkprogrammu
@@ -86,11 +130,28 @@ def main():
         
         print("Lapa ielādēta veiksmīgi!")
         
+        # Iegūt lapas HTML saturu
+        html_content = driver.page_source
+        
         # Saglabāt lapu atkļūdošanai
         with open("debug_page.html", "w", encoding="utf-8") as f:
-            f.write(driver.page_source)
+            f.write(html_content)
             
         print("Lapas saturs saglabāts failā 'debug_page.html'")
+        
+        # Parsēt sludinājumus no lapas
+        ads_found = parse_ads_from_page(html_content)
+        all_collected_ads.extend(ads_found)
+        
+        print(f"Lapā atrasti {len(ads_found)} sludinājumi.")
+        
+        # Izdrukāt pirmos 3 sludinājumus kā paraugu
+        if ads_found:
+            print("\n--- Pirmie 3 atrastie sludinājumi (paraugs): ---")
+            for i, ad_item in enumerate(ads_found[:3]):
+                print(f"  #{i+1}: {ad_item.get('title', 'N/A')} | Cena: {ad_item.get('price', 'N/A')}")
+        else:
+            print("Netika atrasti sludinājumi.")
         
     except Exception as e:
         print(f"Kļūda: {e}")
@@ -100,7 +161,8 @@ def main():
             driver.quit()
             print("Pārlūkprogramma aizvērta.")
     
-    print("--- Skrāpis V1 pabeidzis darbu ---")
+    print(f"\nKopā savākti {len(all_collected_ads)} sludinājumi.")
+    print("--- Skrāpis V2 pabeidzis darbu ---")
 
 if __name__ == "__main__":
     main() 
