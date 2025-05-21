@@ -109,9 +109,11 @@ def setup_driver():
 # --- Galvenā funkcija ---
 def main():
     """
-    Skripta galvenā izpildes funkcija - V2: Sludinājumu datu iegūšana
+    Skripta galvenā izpildes funkcija - V3: Filtru iestatīšana un paginācija
     """
-    print("--- SS.LV Auto Skrāpja (Versija 2: Sludinājumu datu iegūšana) Palaišana ---")
+    print("--- SS.LV Auto Skrāpja (Versija 3: Filtru iestatīšana un paginācija) Palaišana ---")
+    print(f"Filtri: Gads no={MIN_YEAR}, Cena līdz={MAX_PRICE}, Transmisija={TRANSMISSION}")
+    print(f"Maksimālais lapu skaits: {PAGE_LIMIT}")
     
     all_collected_ads = []
     
@@ -123,38 +125,175 @@ def main():
         print(f"Atver SS.LV auto lapu: {CARS_URL}")
         driver.get(CARS_URL)
         
-        # Pārbaudīt, vai lapa ielādējās
+        # Gaidīt, līdz lapa ielādējas
         WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.ID, "filter_frm"))
         )
         
-        print("Lapa ielādēta veiksmīgi!")
+        print("Lapa ielādēta, iestatām filtrus...")
         
-        # Iegūt lapas HTML saturu
-        html_content = driver.page_source
+        # Iestatīt minimālo gadu
+        year_min_selector = driver.find_element(By.NAME, "topt[18][min]")
+        for option in year_min_selector.find_elements(By.TAG_NAME, "option"):
+            if option.get_attribute("value") == MIN_YEAR:
+                option.click()
+                print(f"Iestatīts minimālais gads: {MIN_YEAR}")
+                break
         
-        # Saglabāt lapu atkļūdošanai
-        with open("debug_page.html", "w", encoding="utf-8") as f:
-            f.write(html_content)
+        # Iestatīt maksimālo cenu
+        max_price_input = driver.find_element(By.NAME, "topt[8][max]")
+        max_price_input.clear()
+        max_price_input.send_keys(MAX_PRICE)
+        print(f"Iestatīta maksimālā cena: {MAX_PRICE}")
+        
+        # Iestatīt automātisko transmisiju
+        try:
+            # Konkrēts elements pēc nosaukuma (zināms no iepriekšējās analīzes)
+            transmission_select = driver.find_element(By.NAME, "opt[35]")
+            # Izvēlamies opciju ar kodu 497 (automātiskā ātrumkārba)
+            for option in transmission_select.find_elements(By.TAG_NAME, "option"):
+                if option.get_attribute("value") == "497":
+                    option.click()
+                    print(f"Iestatīta automātiskā ātrumkārba, kods: 497")
+                    break
+        except NoSuchElementException:
+            print("Neizdevās atrast konkrēto ātrumkārbas filtru (opt[35]). Meklējam alternatīvu...")
             
-        print("Lapas saturs saglabāts failā 'debug_page.html'")
+            # Plašāka meklēšana
+            try:
+                # Atrodam visus select elementus un meklējam to, kas satur "automāts"
+                all_selects = driver.find_elements(By.TAG_NAME, "select")
+                for select in all_selects:
+                    select_id = select.get_attribute("id")
+                    select_name = select.get_attribute("name")
+                    print(f"Analizē select elementu: ID={select_id}, NAME={select_name}")
+                    
+                    # Pārbaudām visas opcijas
+                    options = select.find_elements(By.TAG_NAME, "option")
+                    for option in options:
+                        option_text = option.text.lower()
+                        option_value = option.get_attribute("value")
+                        
+                        if "automāt" in option_text or "автомат" in option_text:
+                            print(f"Atrasts automātiskās ātrumkārbas variants: '{option_text}' ar vērtību '{option_value}'")
+                            option.click()
+                            print(f"Iestatīta automātiskā ātrumkārba")
+                            break
+            except Exception as e:
+                print(f"Neizdevās iestatīt ātrumkārbas filtru: {e}")
+                
+        # Saglabājam HTML pirms pogas nospiešanas atkļūdošanai
+        with open("debug_before_button_click.html", "w", encoding="utf-8") as f:
+            f.write(driver.page_source)
         
-        # Parsēt sludinājumus no lapas
-        ads_found = parse_ads_from_page(html_content)
-        all_collected_ads.extend(ads_found)
+        # Veidojam ekrānuzņēmumu atkļūdošanai
+        driver.save_screenshot("before_search_click.png")
         
-        print(f"Lapā atrasti {len(ads_found)} sludinājumi.")
+        print("Meklējam meklēšanas pogu...")
         
-        # Izdrukāt pirmos 3 sludinājumus kā paraugu
-        if ads_found:
-            print("\n--- Pirmie 3 atrastie sludinājumi (paraugs): ---")
-            for i, ad_item in enumerate(ads_found[:3]):
-                print(f"  #{i+1}: {ad_item.get('title', 'N/A')} | Cena: {ad_item.get('price', 'N/A')}")
-        else:
-            print("Netika atrasti sludinājumi.")
+        # Meklēšanas pogas meklēšana
+        try:
+            # Vispirms mēģinām atrast pēc tipa un vērtības
+            search_button = driver.find_element(By.CSS_SELECTOR, "input[type='submit'][value='Meklēt']")
+            print("Atrasta meklēšanas poga ar vērtību 'Meklēt'")
+            # Pauze pirms nospiešanas
+            time.sleep(1)
+            search_button.click()
+            print("Meklēšanas poga nospiesta")
+        except NoSuchElementException:
+            print("Nav atrasta poga ar tekstu 'Meklēt', meklējam jebkuru submit pogu...")
+            
+            try:
+                # Meklējam visas submit pogas un izvadām tās atkļūdošanai
+                submit_buttons = driver.find_elements(By.CSS_SELECTOR, "input[type='submit']")
+                print(f"Atrastas submit pogas: {len(submit_buttons)}")
+                
+                for idx, button in enumerate(submit_buttons):
+                    button_value = button.get_attribute("value")
+                    button_id = button.get_attribute("id")
+                    print(f"Poga #{idx+1}: value='{button_value}', id='{button_id}'")
+                
+                if submit_buttons:
+                    # Nospiežam pirmo atrasto submit pogu
+                    submit_buttons[0].click()
+                    print(f"Nospiesta pirmā atrastā submit poga ar value='{submit_buttons[0].get_attribute('value')}'")
+                else:
+                    # Ja pogu nav, mēģinām iesniegt formu
+                    filter_form = driver.find_element(By.ID, "filter_frm")
+                    driver.execute_script("arguments[0].submit();", filter_form)
+                    print("Forma iesniegta ar JavaScript")
+            except Exception as e:
+                print(f"Kļūda, meklējot un spiežot pogu: {e}")
+                try:
+                    # Pēdējais mēģinājums - nospiest Enter cenas laukā
+                    max_price_input.send_keys("\n")
+                    print("Nospiesta Enter taustiņš cenas laukā")
+                except:
+                    print("Neizdevās iesniegt formu nekādā veidā")
+        
+        # Veidojam ekrānuzņēmumu pēc nospiešanas
+        time.sleep(2)
+        driver.save_screenshot("after_search_click.png")
+        
+        # Gaidām, kamēr mainās URL (rezultātu lapas pazīme)
+        try:
+            WebDriverWait(driver, 10).until(
+                lambda d: "filter" in d.current_url
+            )
+            print(f"Ielādēta rezultātu lapa: {driver.current_url}")
+        except TimeoutException:
+            print("Pārsniegts gaidīšanas laiks, mēģinām turpināt...")
+        
+        # Saglabājam rezultātu HTML atkļūdošanai
+        with open("debug_initial_response.html", "w", encoding="utf-8") as f:
+            f.write(driver.page_source)
+        
+        # Veidojam ekrānuzņēmumu rezultātu lapai
+        driver.save_screenshot("search_results_page.png")
+        
+        # Apstrādājam rezultātus no pirmās lapas
+        html_content_page1 = driver.page_source
+        ads_on_page1 = parse_ads_from_page(html_content_page1)
+        print(f"Lapā 1 atrasti {len(ads_on_page1)} sludinājumi.")
+        all_collected_ads.extend(ads_on_page1)
+        
+        # Ja ir sludinājumi un atļauts skatīt vairāk lapu, mēģinām pārlūkot citas lapas
+        if ads_on_page1 and PAGE_LIMIT > 1:
+            current_page = 1
+            while current_page < PAGE_LIMIT:
+                try:
+                    # Meklējam saiti uz nākamo lapu
+                    next_page_links = driver.find_elements(By.CSS_SELECTOR, "a.navi[rel='next']")
+                    if not next_page_links:
+                        print("Nav atrasta saite uz nākamo lapu. Pārtrauc pagināciju.")
+                        break
+                    
+                    # Klikšķinām uz saites uz nākamo lapu
+                    next_page_links[0].click()
+                    current_page += 1
+                    print(f"Pārejam uz lapu {current_page}...")
+                    
+                    # Gaidām, līdz lapa ielādējas
+                    time.sleep(PAGE_LOAD_DELAY)
+                    
+                    # Iegūstam lapas HTML
+                    html_content_page_n = driver.page_source
+                    
+                    # Apstrādājam rezultātus
+                    ads_on_subsequent_page = parse_ads_from_page(html_content_page_n)
+                    print(f"Lapā {current_page} atrasti {len(ads_on_subsequent_page)} sludinājumi.")
+                    
+                    if not ads_on_subsequent_page:
+                        print(f"Lapā {current_page} netika atrasti sludinājumi. Pieņem, ka sasniegtas rezultātu beigas.")
+                        break
+                    
+                    all_collected_ads.extend(ads_on_subsequent_page)
+                except Exception as e:
+                    print(f"Kļūda, apstrādājot lapu {current_page}: {e}")
+                    break
         
     except Exception as e:
-        print(f"Kļūda: {e}")
+        print(f"Galvenā kļūda: {e}")
     finally:
         # Aizvērt pārlūkprogrammu
         if 'driver' in locals():
@@ -162,7 +301,16 @@ def main():
             print("Pārlūkprogramma aizvērta.")
     
     print(f"\nKopā savākti {len(all_collected_ads)} sludinājumi.")
-    print("--- Skrāpis V2 pabeidzis darbu ---")
+    
+    # Izdrukāt pirmos 3 sludinājumus kā paraugu
+    if all_collected_ads:
+        print(f"\n--- Pirmie 3 atrastie sludinājumi (paraugs): ---")
+        for i, ad_item in enumerate(all_collected_ads[:3]):
+            print(f"  #{i+1}: {ad_item.get('title', 'N/A')} | Cena: {ad_item.get('price', 'N/A')}")
+    else:
+        print("\nNetika atrasti sludinājumi ar dotajiem kritērijiem.")
+    
+    print("--- Skrāpis V3 pabeidzis darbu ---")
 
 if __name__ == "__main__":
     main() 
